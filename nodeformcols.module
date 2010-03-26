@@ -61,36 +61,18 @@ function nodeformcols_form_regions() {
   );
 }
 
-/**
- * Gets default placements for standard fields
- *
- * @return array
- */
-function _nodeformscols_default_field_placements() {
-  return array(
-    'title' => array('region' => 'main'),
-    'body_field' => array('region' => 'main'),
-    'menu' => array('region' => 'right'),
-    'revision_information' => array('region' => 'right'),
-    'comment_settings' => array('region' => 'right'),
-    'path' => array('region' => 'right'),
-    'options' => array('region' => 'right'),
-    'author' => array('region' => 'right'),
-    'buttons' => array('region' => NODEFORMCOLS_DEFAULT_REGION, 'weight' => 100),
-  );
-}
-
+//TODO: Replace this function
 function nodeformscols_field_placements($content_type, $variant) {
-  $default = _nodeformscols_default_field_placements();
   if ($variant != 'default') {
-    $default = variable_get('nodeformscols_field_placements_' .
-      $content_type . '_default', $default);
+    $preset = nodeformcols_preset_load($content_type . '_' . $variant);
   }
-
-  $placements = variable_get('nodeformscols_field_placements_' . $content_type .
-    '_' . $variant, $default);
-
-  return $placements;
+  if (!$placements && $variant != 'default') {
+    $preset = nodeformcols_preset_load($content_type . '_default');
+  }
+  if (!$placements) {
+    $preset = nodeformcols_preset_new();
+  }
+  return $preset;
 }
 
 function nodeformscols_content_extra_fields($type_name, $variant) {
@@ -115,8 +97,8 @@ function nodeformcols_form_alter(&$form, $form_state, $form_id) {
   if ('node-form' == $form['#id']) {
     drupal_alter('nodeformcols_pre_form', $form);
     $variant = isset($form['#nodeformcols_variant']) ? $form['#nodeformcols_variant'] : 'default';
-    $placements = nodeformscols_field_placements($form['#node']->type, $variant);
-    foreach ($placements as $key => $p) {
+    $preset = nodeformscols_field_placements($form['#node']->type, $variant);
+    foreach ($preset->conf as $key => $p) {
       if (isset($p['hidden']) && $p['hidden']) {
         $form[$key]['#access'] = FALSE;
       }
@@ -149,7 +131,8 @@ function template_preprocess_node_form(&$aVars) {
 
   drupal_alter('nodeformcols_pre_placement', $form);
   $variant = isset($form['#nodeformcols_variant']) ? $form['#nodeformcols_variant'] : 'default';
-  $placements = nodeformscols_field_placements($form['#node']->type, $variant);
+  $preset = nodeformscols_field_placements($form['#node']->type, $variant);
+  $placements = $preset->conf;
 
   // Track if new fields should be adjusted above the buttons.
   // TODO: This should be generalized to a way to tell nodeformcols where to place new fields (above below field X).
@@ -208,6 +191,8 @@ function template_preprocess_node_form(&$aVars) {
  * Implementation of hook_node_type().
  */
 function nodeformcols_node_type($op, $info) {
+  //TODO: Act on the deletion or change of node types
+/*
   switch ($op) {
     case 'delete':
       db_query("DELETE FROM {variable} WHERE name LIKE '%s'", array(
@@ -233,4 +218,75 @@ function nodeformcols_node_type($op, $info) {
       }
       break;
   }
+*/
+}
+
+// --------------------------------------------------------------------------
+// Preset database info.
+
+/**
+ * Create a new preset with defaults appropriately set from schema.
+ */
+function nodeformcols_preset_new() {
+  ctools_include('export');
+  return ctools_export_new_object('nodeformcols_preset');
+}
+
+/**
+ * Load a single preset
+ */
+function nodeformcols_preset_load($name) {
+  ctools_include('export');
+  $result = ctools_export_load_object('nodeformcols_preset', 'names', array($name));
+  if (isset($result[$name])) {
+    return $result[$name];
+  }
+  else {
+    return FALSE;
+  }
+}
+
+/**
+ * Load all presets.
+ */
+function nodeformcols_preset_load_all() {
+  ctools_include('export');
+  return ctools_export_load_object('nodeformcols_preset');
+}
+
+/**
+ * Write a preset to the database.
+ */
+function nodeformcols_preset_save(&$preset) {
+  $update = (isset($preset->pid)) ? array('pid') : array();
+  drupal_write_record('nodeformcols_preset', $preset, $update);
+  return $preset;
+}
+
+/**
+ * Remove a preset.
+ */
+function nodeformcols_preset_delete($preset) {
+  db_query("DELETE FROM {nodeformcols_preset} WHERE name = '%s' AND pid = %d", $preset->name, $preset->pid);
+}
+
+/**
+ * Export a preset
+ */
+function nodeformcols_preset_export($preset, $indent = '') {
+  ctools_include('export');
+  $output = ctools_export_object('nodeformcols_preset', $preset, $indent);
+  return $output;
+}
+
+/**
+ * Lists all available presets
+ */
+function nodeformcols_preset_list() {
+  $return = array();
+  $presets = nodeformcols_preset_load_all();
+  foreach ($presets as $preset) {
+    $return[$preset->name] = $preset->name;
+  }
+  return $return;
 }

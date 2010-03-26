@@ -12,16 +12,68 @@
 function nodeformcols_install() {
   // We need our hook_theme() to run after node.module's hook_theme().
   db_query("UPDATE {system} SET weight = %d WHERE name = '%s' AND type = '%s'", 1, 'nodeformcols', 'module');
+  drupal_install_schema('nodeformcols');
 }
 
 /**
  * Implementation of hook_uninstall().
  */
 function nodeformcols_uninstall() {
-  $res = db_query("SELECT name FROM {variable} WHERE name LIKE 'nodeformscols_field_placements_%'");
-  while ($v = db_fetch_object($res)) {
-    variable_del($v->name);
-  }
+  drupal_uninstall_schema('nodeformcols');
+}
+
+/**
+ * Implementation of hook_schema().
+ */
+function nodeformcols_schema() {
+  //TODO: Add the node type as a field as well - to make it easier to identify which node type a preset is for
+  $schema['nodeformcols_preset'] = array(
+    'export' => array(
+      'identifier'      => 'preset',
+      'export callback' => 'nodeformcols_preset_export',
+      'list callback'   => 'nodeformcols_preset_list',
+      'can disable'     => FALSE,
+    ),
+    'fields' => array(
+      'pid' => array(
+        'type'        => 'serial',
+        'description' => 'Primary ID field for the table. Not used for anything except internal lookups.',
+        'not null'    => TRUE,
+        'no export'   => TRUE,
+      ),
+      'name' => array(
+        'type'        => 'varchar',
+        'length'      => 255,
+        'description' => 'Unique ID for this preset. Used to identify it programmatically.',
+        'not null'    => TRUE,
+        'default'     => '',
+      ),
+      'conf' => array(
+        'type'           => 'text',
+        'size'           => 'big',
+        'description'    => 'Serialized configuration.',
+        'not null'       => TRUE,
+        'serialize'      => TRUE,
+        'object default' => array(
+          'title'                => array('region' => 'main'),
+          'body_field'           => array('region' => 'main'),
+          'menu'                 => array('region' => 'right'),
+          'revision_information' => array('region' => 'right'),
+          'comment_settings'     => array('region' => 'right'),
+          'path'                 => array('region' => 'right'),
+          'options'              => array('region' => 'right'),
+          'author'               => array('region' => 'right'),
+          'buttons'              => array('region' => NODEFORMCOLS_DEFAULT_REGION, 'weight' => 100),
+        ),
+      ),
+    ),
+    'primary key' => array('pid'),
+    'unique keys' => array(
+      'name' => array('name'),
+    ),
+  );
+
+  return $schema;
 }
 
 /**
@@ -60,4 +112,24 @@ function nodeformcols_update_6100() {
     'success' => TRUE,
     'query' => 'Renamed nodeformcol variables',
   ));
+}
+
+function nodeformcols_update_6101() {
+  $ret = array();
+
+  drupal_install_schema('nodeformcols');
+
+  $var = NULL;
+  $res = db_query("SELECT name FROM {variable} WHERE name LIKE 'nodeformscols_field_placements_%'");
+  while ($v = db_fetch_object($res)) {
+    $var = variable_get($v->name, NULL);
+    $var = (object) array(
+      'name' => substr($v->name, 31),
+      'conf' => $var,
+    );
+    drupal_write_record('nodeformcols_preset', $var);
+    variable_del($v->name);
+  }
+
+  return $ret;
 }

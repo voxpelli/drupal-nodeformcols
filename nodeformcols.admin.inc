@@ -18,6 +18,7 @@ function _nodeformcols_get_node_type_form($type) {
   return $nf;
 }
 
+//TODO: Why have the variable by reference here? Return the value instead?
 function nodeformcols_update_placements($type, $variant, &$placements) {
   $form = _nodeformcols_get_node_type_form($type);
   drupal_alter('nodeformcols_base_form', $form, $variant);
@@ -112,10 +113,32 @@ function nodeformcols_configuration_form($form_state, $type, $variant='default')
   }
   $form['#variant'] = $variant;
 
-  $placements = nodeformscols_field_placements($type, $variant);
-  nodeformcols_update_placements($type, $variant, $placements);
+  $preset = nodeformcols_preset_load($type . '_' . $variant);
+  if (!$preset) {
+    $preset = nodeformcols_preset_new();
+    if ($variant != 'default') {
+      $default = nodeformcols_preset_load($type . '_default');
+      if ($default) {
+        $preset->conf = $default->conf;
+      }
+    }
+  }
+  nodeformcols_update_placements($type, $variant, $preset->conf);
 
   $regions = nodeformcols_form_regions();
+
+  $form['preset'] = array(
+    '#type'  => 'value',
+    '#value' => $preset,
+  );
+  $form['pid'] = array(
+    '#type'  => 'value',
+    '#value' => isset($preset->pid) ? $preset->pid : '',
+  );
+  $form['name'] = array(
+    '#type'  => 'value',
+    '#value' => $type . '_' . $variant,
+  );
 
   $form['type'] = array(
     '#type' => 'value',
@@ -126,7 +149,7 @@ function nodeformcols_configuration_form($form_state, $type, $variant='default')
     '#theme' => array('nodeformcols_configuration'),
   );
 
-  foreach ($placements as $name => $info) {
+  foreach ($preset->conf as $name => $info) {
     $key = 'field_' . $name;
     $weight = isset($info['weight']) ? $info['weight'] : 0;
     $form['conf'][$info['region']][$key] = array(
@@ -175,6 +198,13 @@ function nodeformcols_configuration_form($form_state, $type, $variant='default')
     '#value' => t('Save'),
   );
 
+  if ($preset->export_type == (EXPORT_IN_CODE | EXPORT_IN_DATABASE) || ($preset->pid && $preset->export_type == EXPORT_IN_DATABASE)) {
+    $form['reset'] = array(
+      '#type' => 'submit',
+      '#value' => t('Reset to defaults'),
+    );
+  }
+
   return $form;
 }
 
@@ -215,11 +245,20 @@ function _nodeformcols_configuration_form_after_build($form) {
 
 function nodeformcols_configuration_form_submit($form, $form_state) {
   $values = $form_state['values'];
-  $type = $values['type'];
-  $placements = nodeformscols_field_placements($type, $form['#variant']);
-  nodeformcols_update_placements($type, $form['#variant'], $placements);
 
-  foreach ($placements as $name => &$opt) {
+  $op     = isset($values['op']) ? $values['op'] : '';
+  $preset = $values['preset'];
+  $type   = $values['type'];
+
+  if ($op == t('Reset to defaults')) {
+    drupal_set_message(t('The preset %name has been removed.', array('%name' => $preset->name)));
+    nodeformcols_preset_delete($preset);
+    return;
+  }
+
+  $preset->name = $form_state['values']['name'];
+
+  foreach ($preset->conf as $name => $opt) {
     $field = 'field_' . $name;
     $opt['region'] = $values[$field . '_region'];
     $opt['weight'] = $values[$field . '_weight'];
@@ -229,8 +268,16 @@ function nodeformcols_configuration_form_submit($form, $form_state) {
     if (isset($values[$field . '_collapsed'])) {
       $opt['collapsed'] = $values[$field . '_collapsed'];
     }
+    $preset->conf[$name] = $opt;
   }
 
-  variable_set('nodeformscols_field_placements_' . $type .
-    '_' . $form['#variant'], $placements);
+  if (empty($preset->pid)) {
+    drupal_set_message(t('Your new preset %name has been saved.', array('%name' => $preset->name)));
+    nodeformcols_preset_save($preset);
+    $form_state['values']['pid'] = $preset->pid;
+  }
+  else {
+    drupal_set_message(t('Your changes have been saved.'));
+    nodeformcols_preset_save($preset);
+  }
 }
